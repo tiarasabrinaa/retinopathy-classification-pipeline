@@ -1,0 +1,31 @@
+# DeiT-Small fine-tuning config.
+# Model id from timm: https://huggingface.co/timm/deit_small_patch16_224.fb_in1k
+model_name: deit_small_patch16_224
+num_classes: 4
+image_size: 224
+seed: 42
+
+train_csv: dataset_splits/train.csv
+val_csv: dataset_splits/val.csv
+test_csv: dataset_splits/test.csv
+class_names_json: dataset_splits/class_names.json
+batch_size: 32
+num_workers: 4
+
+# weight_decay / label_smoothing match the DeiT paper's fine-tuning recipe
+# (Touvron et al. 2021, https://github.com/facebookresearch/deit)
+# Kept identical to the ConvNeXt config on purpose, so the head-to-head
+# comparison isn't confounded by different training budgets/regularization.
+weight_decay: 0.05
+label_smoothing: 0.1
+
+# Phase 1: backbone frozen, only the classifier head trains.
+linear_probe_epochs: 5
+linear_probe_lr: 1.0e-3
+
+# Phase 2: every parameter trains, low LR + cosine decay.
+finetune_epochs: 25
+finetune_lr: 5.0e-5
+
+checkpoint_dir: checkpoints/deit_small
+run_name: deit_small_finetune

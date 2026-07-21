@@ -1,0 +1,19 @@
+# dataset images — provided separately on RunPod (network volume / re-download),
+# never committed (large, and not ours to redistribute)
+dataset/
+
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# training artifacts (large, regenerable — logged to MLflow/disk, not git)
+checkpoints/
+mlruns/
+*.pth
+*.pt
+
+.DS_Store

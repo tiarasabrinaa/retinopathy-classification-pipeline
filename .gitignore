@@ -1,6 +1,8 @@
 # dataset images — provided separately on RunPod (network volume / re-download),
-# never committed (large, and not ours to redistribute)
-dataset/
+# never committed (large, and not ours to redistribute). No trailing slash:
+# locally this is a symlink to ../dataset, not a plain directory, and "dataset/"
+# only matches real directories.
+dataset
 
 # secrets
 .env

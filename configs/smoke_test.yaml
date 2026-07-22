@@ -1,0 +1,26 @@
+# Local smoke-test config: same CLI flow as RunPod (`python train.py --config ...`)
+# but on a ~100-image subset, just to confirm train.py -> MLflow -> checkpoint
+# actually works end to end before trusting it on RunPod for real.
+model_name: convnext_tiny
+num_classes: 4
+image_size: 224
+seed: 42
+
+train_csv: dataset_splits/_smoke_train.csv
+val_csv: dataset_splits/_smoke_val.csv
+test_csv: dataset_splits/_smoke_test.csv
+class_names_json: dataset_splits/class_names.json
+batch_size: 16
+num_workers: 2
+
+weight_decay: 0.05
+label_smoothing: 0.1
+
+linear_probe_epochs: 2
+linear_probe_lr: 1.0e-3
+
+finetune_epochs: 2
+finetune_lr: 5.0e-5
+
+checkpoint_dir: checkpoints/smoke_test
+run_name: smoke_test_convnext_local

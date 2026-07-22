@@ -6,6 +6,8 @@ dataset
 
 # secrets
 .env
+.env.swp
+*.swp
 
 # python
 __pycache__/

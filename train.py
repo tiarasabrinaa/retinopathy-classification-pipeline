@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import mlflow
@@ -111,6 +112,22 @@ def main() -> None:
             best_val_f1 = val_f1
             torch.save({"model_state": model.state_dict(), "epoch": epoch, "val_macro_f1": val_f1}, best_path)
 
+    total_epochs = cfg["linear_probe_epochs"] + cfg["finetune_epochs"]
+    run_start = time.time()
+
+    def log_progress(global_epoch: int) -> None:
+        """percent complete + ETA, so progress is checkable from the MLflow UI alone
+        (no need to SSH back into the RunPod pod mid-run)."""
+        epochs_done = global_epoch + 1
+        elapsed_min = (time.time() - run_start) / 60
+        eta_min = elapsed_min / epochs_done * (total_epochs - epochs_done)
+        progress_pct = 100 * epochs_done / total_epochs
+        mlflow.log_metrics(
+            {"progress_pct": progress_pct, "elapsed_min": elapsed_min, "eta_min": eta_min}, step=global_epoch
+        )
+        print(f"  -> progress: {epochs_done}/{total_epochs} ({progress_pct:.0f}%), "
+              f"elapsed={elapsed_min:.1f}min, eta={eta_min:.1f}min")
+
     init_mlflow()
     with mlflow.start_run(run_name=cfg["run_name"]):
         mlflow.log_params(cfg)
@@ -131,6 +148,7 @@ def main() -> None:
             )
             print(f"[linear_probe] epoch {epoch}: val_loss={val_loss:.4f} val_macro_f1={val_f1:.4f}")
             maybe_save_checkpoint(val_f1, global_epoch)
+            log_progress(global_epoch)
             global_epoch += 1
 
         # --- Phase 2: full fine-tune (every parameter trains) ---
@@ -148,6 +166,7 @@ def main() -> None:
             )
             print(f"[finetune] epoch {epoch}: val_loss={val_loss:.4f} val_macro_f1={val_f1:.4f}")
             maybe_save_checkpoint(val_f1, global_epoch)
+            log_progress(global_epoch)
             global_epoch += 1
 
         # --- Final test-set evaluation using the best checkpoint ---

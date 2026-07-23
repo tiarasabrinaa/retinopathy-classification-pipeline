@@ -12,10 +12,17 @@ class_names_json: dataset_splits/class_names.json
 batch_size: 32
 num_workers: 4
 
-# weight_decay / label_smoothing match the DeiT paper's fine-tuning recipe
-# (Touvron et al. 2021, https://github.com/facebookresearch/deit)
-# Kept identical to the ConvNeXt config on purpose, so the head-to-head
-# comparison isn't confounded by different training budgets/regularization.
+# weight_decay = 0.05 genuinely matches DeiT's own fine-tuning stage
+# (Touvron et al. 2021, Table 9) -- unlike ConvNeXt, DeiT doesn't reduce
+# weight decay for fine-tuning. Caveat: DeiT's "fine-tuning" there means
+# fine-tuning at a higher resolution on the *same* ImageNet dataset, not
+# transfer to a new dataset like ours, so it's the closest available
+# precedent rather than a value validated for this exact use case.
+# Kept identical to the ConvNeXt config's weight_decay on purpose (even
+# though ConvNeXt's own fine-tuning recipe actually uses 1e-8 -- see the
+# comment in configs/convnext_tiny.yaml), so the head-to-head comparison
+# isn't confounded by different regularization strength.
+# label_smoothing = 0.1 matches DeiT Table 9 exactly (both training stages).
 weight_decay: 0.05
 label_smoothing: 0.1
 

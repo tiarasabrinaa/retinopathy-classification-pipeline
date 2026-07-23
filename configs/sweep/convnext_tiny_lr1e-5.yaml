@@ -1,0 +1,53 @@
+# Hyperparameter-search candidate (cheap epoch budget on purpose — see
+# "Hyperparameter search" in README). Same as configs/convnext_tiny.yaml
+# except finetune_lr and a shorter epoch budget.
+model_name: convnext_tiny
+num_classes: 4
+image_size: 224
+seed: 42
+
+train_csv: dataset_splits/train.csv
+val_csv: dataset_splits/val.csv
+test_csv: dataset_splits/test.csv
+class_names_json: dataset_splits/class_names.json
+batch_size: 32
+num_workers: 4
+
+# weight_decay = 0.05 -- correction: NOT ConvNeXt's fine-tuning value.
+# ConvNeXt's actual ImageNet-22K->1K fine-tuning recipe (Liu et al. 2022,
+# Table 6 appendix) uses weight_decay=1e-8 (near zero); 0.05 is their
+# *pretraining-from-scratch* value instead. Kept anyway since our train set
+# (~3000 images) is far smaller than ImageNet (higher regularization seems
+# safer than near-zero decay -- our own judgment call, not paper-validated
+# for this use case), and to match DeiT's weight_decay (which DeiT's paper
+# does use during fine-tuning) so the comparison isn't confounded.
+# Only finetune_lr is swept here, see README "Hyperparameter search".
+weight_decay: 0.05
+
+# label_smoothing = 0.1 matches ConvNeXt Table 6 (fine-tuning row) and DeiT
+# Table 9 exactly, for both pretraining and fine-tuning.
+label_smoothing: 0.1
+
+# linear_probe_epochs -- NOT paper-sourced, see the note above finetune_epochs
+# below (same reasoning applies to both).
+linear_probe_epochs: 3
+# linear_probe_lr = 1e-3 -- NOT from the ConvNeXt paper (it doesn't describe
+# a linear-probe phase). This is AdamW's own default learning rate (Kingma &
+# Ba, 2015, "Adam: A Method for Stochastic Optimization", recommends
+# alpha=0.001 as a good default; torch.optim.AdamW defaults to the same
+# value) -- used as-is because the head is a freshly-initialized linear
+# layer, not something tuned for retinal images specifically.
+linear_probe_lr: 1.0e-3
+
+# Epoch counts (linear_probe_epochs above, finetune_epochs here) are NOT
+# paper-sourced -- ConvNeXt/DeiT train hundreds of epochs on ImageNet-scale
+# pretraining, not applicable to this ~3000-image 4-class dataset. The full
+# configs (configs/convnext_tiny.yaml / configs/deit_small.yaml) use 5+25
+# epochs as a practical convergence budget for this dataset size; sweep
+# configs deliberately cut that to 3+8 (~1/3), purely to keep hyperparameter
+# search cheap on RunPod -- see README "Hyperparameter search".
+finetune_epochs: 8
+finetune_lr: 1.0e-5  # swept value for this candidate, see README "Hyperparameter search"
+
+checkpoint_dir: checkpoints/sweep/convnext_tiny_lr1e-5
+run_name: sweep_convnext_tiny_lr1e-5

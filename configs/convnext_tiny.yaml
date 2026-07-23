@@ -12,8 +12,19 @@ class_names_json: dataset_splits/class_names.json
 batch_size: 32
 num_workers: 4
 
-# weight_decay / label_smoothing match the ConvNeXt paper's fine-tuning recipe
-# (Liu et al. 2022, https://github.com/facebookresearch/ConvNeXt)
+# weight_decay = 0.05 -- correction: this is NOT ConvNeXt's fine-tuning
+# value. The ConvNeXt paper's actual ImageNet-22K->1K fine-tuning recipe
+# (Liu et al. 2022, Table 6 appendix) uses weight_decay=1e-8 (near zero);
+# 0.05 is their *pretraining-from-scratch* value instead. We keep 0.05
+# anyway because (a) our train set (~3000 images) is far smaller than
+# ImageNet, so higher regularization seems safer than near-zero decay --
+# our own judgment call, not something either paper validates for transfer
+# to a new small dataset -- and (b) it matches DeiT's weight_decay, which
+# DeiT's paper *does* use during its own fine-tuning stage (Touvron et al.
+# 2021, Table 9), so ConvNeXt-vs-DeiT isn't confounded by different
+# regularization strength.
+# label_smoothing = 0.1 matches both papers (ConvNeXt Table 6 fine-tuning
+# row, and DeiT Table 9) exactly, for both pretraining and fine-tuning.
 weight_decay: 0.05
 label_smoothing: 0.1
 

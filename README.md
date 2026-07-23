@@ -75,6 +75,33 @@ The model with the better test macro-F1 (with per-class recall on
 `diabetic_retinopathy` as a tie-breaker, since missing DR is the costlier
 error) is the one that moves on to the explainability phase.
 
+## Hyperparameter search
+
+Before committing to a full 30-epoch run per architecture, run a cheap
+search over `finetune_lr` (the highest-impact fine-tuning hyperparameter)
+with a shorter epoch budget:
+
+```bash
+for cfg in configs/sweep/convnext_tiny_lr*.yaml; do
+    python train.py --config "$cfg"
+done
+for cfg in configs/sweep/deit_small_lr*.yaml; do
+    python train.py --config "$cfg"
+done
+```
+
+Each candidate becomes its own MLflow run (`sweep_<model>_lr<value>`) — sort
+the experiment's runs table by `val_macro_f1` (or use the "Compare" /
+parallel-coordinates view) to see which `finetune_lr` won for each
+architecture.
+
+Then, edit `configs/convnext_tiny.yaml` / `configs/deit_small.yaml` so
+`finetune_lr` matches the winner, and run the **full** config
+(`linear_probe_epochs: 5, finetune_epochs: 25`) once per architecture. That
+final run's checkpoint (`checkpoint_dir/best.pt`) — not any sweep run's
+checkpoint — is what feeds the explainability phase below, since sweep runs
+are intentionally under-trained to keep search cheap.
+
 ## Not yet implemented (next phase)
 
 Grad-CAM (ConvNeXt), Attention Rollout (DeiT), and deletion/insertion AUC

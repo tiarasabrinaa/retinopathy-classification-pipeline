@@ -17,6 +17,8 @@ common.py                # Dataset, transforms, model builder, MLflow helpers �
 explain.py                 # Grad-CAM, Attention Rollout, deletion/insertion AUC — shared by run_explainability.py
 make_splits.py            # run once: builds the stratified train/val/test split
 train.py                  # fine-tunes ONE model per run, logs to MLflow
+start.sh                    # runs the full finetune_lr x finetune_epochs grid (see "Comparing learning rates and epoch budgets")
+evaluate.py                  # full classification report + ROC-AUC + confusion matrices for one trained model
 run_explainability.py       # explainability + faithfulness scoring for one trained model
 ```
 
@@ -71,38 +73,46 @@ Each run does:
 2. **Phase 2 — full fine-tune**: every parameter trains (`finetune_epochs`,
    low LR, cosine decay).
 3. Best checkpoint (by validation macro-F1) is evaluated once on the held-out
-   test set; test metrics + confusion matrix are logged to MLflow.
+   test set; test metrics + confusion matrix are logged to MLflow. A
+   validation-set classification report (per-class precision/recall/F1) is
+   also logged as an MLflow text artifact (`val_classification_report.txt`)
+   on every run — safe to check any time since it never touches the test set.
 
-The model with the better test macro-F1 (with per-class recall on
+Comparing the two finished models' `test_macro_f1` (with per-class recall on
 `diabetic_retinopathy` as a tie-breaker, since missing DR is the costlier
-error) is the one that moves on to the explainability phase.
+error) is the final head-to-head result. Both models move on to the
+explainability phase below — the comparison isn't just "which one wins,"
+it's ConvNeXt vs DeiT on both accuracy and explainability faithfulness.
 
-## Hyperparameter search
+## Comparing learning rates and epoch budgets
 
-Before committing to a full 30-epoch run per architecture, run a cheap
-search over `finetune_lr` (the highest-impact fine-tuning hyperparameter)
-with a shorter epoch budget:
+`train.py` accepts `--finetune-lr` / `--finetune-epochs` to override a
+config's values for a grid search, instead of hand-maintaining one YAML
+file per combination. Each override run gets a unique `run_name` /
+`checkpoint_dir` (suffixed `_lr<value>_ep<epochs>`) so nothing collides with
+the main run. `linear_probe_epochs` stays fixed (from the base config);
+`--finetune-epochs` also reshapes that run's cosine LR schedule (`T_max`),
+so each budget gets a properly-annealed schedule of its own rather than
+being read off a single longer run.
+
+`start.sh` runs the full grid: 3 `finetune_lr` candidates
+(`1e-4`, `1e-5`, `5e-5`) x 5 `finetune_epochs` budgets (`10, 20, 30, 40, 50`),
+for both architectures -- 30 complete runs:
 
 ```bash
-for cfg in configs/sweep/convnext_tiny_lr*.yaml; do
-    python train.py --config "$cfg"
-done
-for cfg in configs/sweep/deit_small_lr*.yaml; do
-    python train.py --config "$cfg"
-done
+bash start.sh
 ```
 
-Each candidate becomes its own MLflow run (`sweep_<model>_lr<value>`) — sort
-the experiment's runs table by `val_macro_f1` (or use the "Compare" /
-parallel-coordinates view) to see which `finetune_lr` won for each
-architecture.
-
-Then, edit `configs/convnext_tiny.yaml` / `configs/deit_small.yaml` so
-`finetune_lr` matches the winner, and run the **full** config
-(`linear_probe_epochs: 5, finetune_epochs: 25`) once per architecture. That
-final run's checkpoint (`checkpoint_dir/best.pt`) — not any sweep run's
-checkpoint — is what feeds the explainability phase below, since sweep runs
-are intentionally under-trained to keep search cheap.
+Compare runs by **`val_macro_f1`** (or the fuller
+`val_classification_report.txt` artifact) in MLflow to pick a winner per
+architecture -- **never** by `test_macro_f1` / `test_classification_report.txt`,
+even though every run logs those too (for record-keeping only). Using test
+results to choose between configs is exactly the leakage the paper's own
+methodology (Sec. 3.1.3) warns against. Once a `(finetune_lr, finetune_epochs)`
+combo wins for an architecture, update `configs/convnext_tiny.yaml` /
+`configs/deit_small.yaml` to match, and copy that winning run's checkpoint
+(`checkpoints/<model>_lr<...>_ep<...>/best.pt`) to `checkpoints/<model>/best.pt`
+instead of re-training, since it was already a full run.
 
 ## Explainability phase
 

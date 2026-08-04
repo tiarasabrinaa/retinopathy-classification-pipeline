@@ -27,11 +27,12 @@ import json
 import time
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import mlflow
 import torch
 import torch.nn as nn
 import yaml
-from sklearn.metrics import confusion_matrix, f1_score
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -39,6 +40,7 @@ from common import (
     RetinaDataset,
     build_model,
     build_transforms,
+    confusion_matrix_figure,
     get_device,
     init_mlflow,
     log_confusion_matrix,
@@ -76,8 +78,21 @@ def run_epoch(model, loader, device, criterion, optimizer=None):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--finetune-lr", type=float, default=None,
+                         help="override cfg's finetune_lr, e.g. for a grid search")
+    parser.add_argument("--finetune-epochs", type=int, default=None,
+                         help="override cfg's finetune_epochs, e.g. for a grid search")
     args = parser.parse_args()
     cfg = yaml.safe_load(args.config.read_text())
+
+    # Grid-search overrides: keep run_name/checkpoint_dir unique per combination
+    # instead of hand-maintaining one YAML file per (lr, epochs) pair.
+    if args.finetune_lr is not None or args.finetune_epochs is not None:
+        cfg["finetune_lr"] = args.finetune_lr if args.finetune_lr is not None else cfg["finetune_lr"]
+        cfg["finetune_epochs"] = args.finetune_epochs if args.finetune_epochs is not None else cfg["finetune_epochs"]
+        suffix = f"_lr{cfg['finetune_lr']:.0e}_ep{cfg['finetune_epochs']}"
+        cfg["run_name"] += suffix
+        cfg["checkpoint_dir"] += suffix
 
     set_seed(cfg["seed"])
     device = get_device()
@@ -169,12 +184,35 @@ def main() -> None:
             log_progress(global_epoch)
             global_epoch += 1
 
-        # --- Final test-set evaluation using the best checkpoint ---
+        # --- Final evaluation using the best checkpoint ---
         model.load_state_dict(torch.load(best_path, map_location=device)["model_state"])
+
+        # Validation classification report + confusion matrix: safe to log for
+        # every run since it never touches the test set, and gives a per-class
+        # breakdown in MLflow instead of only the val_macro_f1 scalar.
+        _, _, val_y_true, val_y_pred = run_epoch(model, val_loader, device, criterion)
+        mlflow.log_text(
+            classification_report(val_y_true, val_y_pred, target_names=class_names, digits=4),
+            "val_classification_report.txt",
+        )
+        log_confusion_matrix(confusion_matrix(val_y_true, val_y_pred), class_names, "val")
+
+        # Test classification report + confusion matrix: logged/printed for
+        # completeness (this run's final numbers), but per the paper's own
+        # methodology (Sec. 3.1.3), the test set must never be used to CHOOSE
+        # between configs/epochs/LRs -- only val_macro_f1 /
+        # val_classification_report.txt above is valid for that.
         test_loss, test_f1, y_true, y_pred = run_epoch(model, test_loader, device, criterion)
+        test_report = classification_report(y_true, y_pred, target_names=class_names, digits=4)
+        test_cm = confusion_matrix(y_true, y_pred)
         mlflow.log_metrics({"test_loss": test_loss, "test_macro_f1": test_f1})
-        log_confusion_matrix(confusion_matrix(y_true, y_pred), class_names, "test")
+        mlflow.log_text(test_report, "test_classification_report.txt")
+        log_confusion_matrix(test_cm, class_names, "test")
+        normalized_fig = confusion_matrix_figure(test_cm, class_names, normalize=True)
+        mlflow.log_figure(normalized_fig, "test_confusion_matrix_normalized.png")
+        plt.close(normalized_fig)
         print(f"[test] loss={test_loss:.4f} macro_f1={test_f1:.4f} (best checkpoint: {best_path})")
+        print(test_report)
 
 
 if __name__ == "__main__":

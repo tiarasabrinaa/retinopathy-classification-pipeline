@@ -36,3 +36,7 @@ finetune_lr: 5.0e-5
 
 checkpoint_dir: checkpoints/deit_small
 run_name: deit_small_finetune
+
+# Explainability phase (run_explainability.py): DeiT is ViT-native, so
+# Attention Rollout applies directly to its self-attention matrices.
+xai_method: attention_rollout

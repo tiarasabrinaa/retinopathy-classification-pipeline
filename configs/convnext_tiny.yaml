@@ -38,3 +38,7 @@ finetune_lr: 5.0e-5
 
 checkpoint_dir: checkpoints/convnext_tiny
 run_name: convnext_tiny_finetune
+
+# Explainability phase (run_explainability.py): ConvNeXt is CNN-native, so
+# Grad-CAM applies directly to its last conv feature map.
+xai_method: grad_cam

@@ -14,8 +14,10 @@ configs/
   convnext_tiny.yaml
   deit_small.yaml
 common.py                # Dataset, transforms, model builder, MLflow helpers — shared by the scripts below
+explain.py                 # Grad-CAM, Attention Rollout, deletion/insertion AUC — shared by run_explainability.py
 make_splits.py            # run once: builds the stratified train/val/test split
 train.py                  # fine-tunes ONE model per run, logs to MLflow
+run_explainability.py       # explainability + faithfulness scoring for one trained model
 ```
 
 No `src/` package, no framework-y layers — this is a 2-model research
@@ -102,11 +104,34 @@ final run's checkpoint (`checkpoint_dir/best.pt`) — not any sweep run's
 checkpoint — is what feeds the explainability phase below, since sweep runs
 are intentionally under-trained to keep search cheap.
 
-## Not yet implemented (next phase)
+## Explainability phase
 
-Grad-CAM (ConvNeXt), Attention Rollout (DeiT), and deletion/insertion AUC
-faithfulness scoring are planned but not built yet — this repo currently
-only covers data prep + fine-tuning + tracking.
+Once a model has a `checkpoint_dir/best.pt` from `train.py`, run:
+
+```bash
+python run_explainability.py --config configs/convnext_tiny.yaml
+python run_explainability.py --config configs/deit_small.yaml
+```
+
+Each config's `xai_method` field picks the method to use — `grad_cam` for
+ConvNeXt (CNN-native, uses the last conv feature map) or
+`attention_rollout` for DeiT (ViT-native, uses the self-attention matrices).
+Both produce a 14x14 patch-importance heatmap (16px patches, matching
+DeiT's native patch grid) so faithfulness scores stay comparable across
+architectures.
+
+For each of `--num-samples` (default 40) randomly sampled test images, the
+script:
+1. generates the heatmap via the configured method,
+2. scores it with **deletion AUC** and **insertion AUC** (RISE-style,
+   patch-based, blurred-image baseline) — see `explain.py` for the
+   implementation and paper `documents/paper/sections/03_methodology.tex`
+   for the write-up,
+3. saves a heatmap-overlay PNG to `checkpoint_dir/explanations/`.
+
+Overlay PNGs stay local (same storage-quota reasoning as checkpoints, see
+below); only the mean deletion/insertion AUC (overall + per class) is
+logged to MLflow, under a `<run_name>_explain` run.
 
 ## Sources
 
@@ -114,6 +139,9 @@ Code patterns here are adapted from, and cited inline as comments where used:
 - [timm](https://github.com/huggingface/pytorch-image-models) — pretrained model loading (`create_model`), transform/normalization resolution
 - [ConvNeXt](https://github.com/facebookresearch/ConvNeXt) (Liu et al., 2022) — fine-tuning recipe (AdamW, weight decay, label smoothing)
 - [DeiT](https://github.com/facebookresearch/deit) (Touvron et al., 2021) — fine-tuning recipe
+- [Grad-CAM](https://arxiv.org/abs/1610.02391) (Selvaraju et al., 2017) — explanation method for `explain.grad_cam`
+- [Attention Rollout](https://arxiv.org/abs/2005.00928) (Abnar & Zuidema, 2020), [reference implementation](https://github.com/samiraabnar/attention_flow) — explanation method for `explain.attention_rollout`
+- [RISE](https://arxiv.org/abs/1806.07421) (Petsiuk et al., 2018) — deletion/insertion AUC faithfulness metric
 - [PyTorch transfer learning tutorial](https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html) — freeze/unfreeze two-phase pattern
 - [PyTorch ImageNet example](https://github.com/pytorch/examples/blob/main/imagenet/main.py) — train/eval loop structure
 - [MLflow tracking docs](https://mlflow.org/docs/latest/tracking.html) / [Databricks-hosted tracking server](https://docs.databricks.com/en/mlflow/access-hosted-tracking-server.html)

@@ -50,6 +50,11 @@ def set_seed(seed: int) -> None:
 
 def get_device() -> torch.device:
     if torch.cuda.is_available():
+        # Workaround for CUDNN_STATUS_NOT_INITIALIZED seen on some cloud GPU
+        # containers (cuDNN fails to init even though plain CUDA ops work
+        # fine) -- falls back to PyTorch's native (non-cuDNN) conv kernels,
+        # still GPU-accelerated, just without cuDNN's fused/tuned kernels.
+        torch.backends.cudnn.enabled = False
         return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")

@@ -31,8 +31,8 @@ linear_probe_epochs: 5
 linear_probe_lr: 1.0e-3
 
 # Phase 2: every parameter trains, low LR + cosine decay.
-finetune_epochs: 25
-finetune_lr: 5.0e-5
+finetune_epochs: 45  # 5 (linear-probe) + 45 = 50 total
+finetune_lr: 5.0e-5  # placeholder -- overwrite with the sweep winner (see README "Hyperparameter search")
 
 checkpoint_dir: checkpoints/deit_small
 run_name: deit_small_finetune

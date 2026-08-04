@@ -132,9 +132,15 @@ def init_mlflow(experiment_name: str | None = None) -> None:
     mlflow.set_experiment(experiment_name or os.environ["MLFLOW_EXPERIMENT_NAME"])
 
 
-def log_confusion_matrix(cm: np.ndarray, class_names: list[str], step_name: str) -> None:
+def confusion_matrix_figure(cm: np.ndarray, class_names: list[str], normalize: bool = False):
+    """Shared by log_confusion_matrix (MLflow, during train.py) and
+    evaluate.py (saved locally as PNG). `normalize` row-normalizes counts
+    into per-true-class percentages (i.e. recall per cell) instead of raw counts."""
+    display = cm / cm.sum(axis=1, keepdims=True) * 100 if normalize else cm
+    fmt = (lambda v: f"{v:.1f}%") if normalize else (lambda v: str(int(v)))
+
     fig, ax = plt.subplots(figsize=(5, 4))
-    im = ax.imshow(cm, cmap="Blues")
+    im = ax.imshow(display, cmap="Blues")
     ax.set_xticks(range(len(class_names)))
     ax.set_yticks(range(len(class_names)))
     ax.set_xticklabels(class_names, rotation=45, ha="right")
@@ -143,8 +149,13 @@ def log_confusion_matrix(cm: np.ndarray, class_names: list[str], step_name: str)
     ax.set_ylabel("True")
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
-            ax.text(j, i, str(cm[i, j]), ha="center", va="center")
+            ax.text(j, i, fmt(display[i, j]), ha="center", va="center")
     fig.colorbar(im, ax=ax)
     fig.tight_layout()
+    return fig
+
+
+def log_confusion_matrix(cm: np.ndarray, class_names: list[str], step_name: str) -> None:
+    fig = confusion_matrix_figure(cm, class_names)
     mlflow.log_figure(fig, f"{step_name}_confusion_matrix.png")
     plt.close(fig)

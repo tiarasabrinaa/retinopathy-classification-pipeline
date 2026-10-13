@@ -14,6 +14,6 @@ linear_probe_epochs: 5
 linear_probe_lr: 0.001
 finetune_epochs: 45
 finetune_lr: 5.0e-05
-checkpoint_dir: ../checkpoints/convnext_tiny_lr1e-05_ep30
+checkpoint_dir: ../checkpoints/_best_convnext_tiny_lr1e-05_ep30
 run_name: convnext_tiny_finetune_gridwinner
 xai_method: grad_cam

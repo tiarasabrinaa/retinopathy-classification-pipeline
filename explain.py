@@ -1,5 +1,6 @@
 """Grad-CAM (ConvNeXt), Attention Rollout (DeiT), and deletion/insertion
-faithfulness scoring, shared by run_explainability.py.
+faithfulness scoring, shared by run_explainability.py, faithfulness.py and
+qualitative_figure.py.
 
 Heatmaps are produced as a 14x14 patch-importance grid (16x16 px patches
 over a 224x224 image) rather than per-pixel, matching DeiT's native patch
@@ -17,12 +18,17 @@ Sources:
 """
 from __future__ import annotations
 
+import random
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision.transforms.functional import gaussian_blur
 
 PATCH_GRID = 14  # 224 / 16, matches DeiT's patch16 grid
+
+XAI_METHOD_LABELS = {"grad_cam": "Grad-CAM", "attention_rollout": "Attention Rollout"}
+MODEL_LABELS = {"convnext_tiny": "ConvNeXt-Tiny", "deit_small_patch16_224": "DeiT-Small"}
 
 
 def _normalize(x: torch.Tensor) -> torch.Tensor:
@@ -143,29 +149,106 @@ def _replace_patches(image: torch.Tensor, patch_indices, baseline: torch.Tensor)
     return replaced
 
 
+def delete_patches(image: torch.Tensor, patch_map: np.ndarray, baseline: torch.Tensor, n: int) -> torch.Tensor:
+    """`image` with its `n` most important patches replaced by `baseline`."""
+    return _replace_patches(image, _patch_order(patch_map)[:n], baseline)
+
+
+def insert_patches(image: torch.Tensor, patch_map: np.ndarray, baseline: torch.Tensor, n: int) -> torch.Tensor:
+    """`baseline` with the `n` most important patches of `image` put back."""
+    return _replace_patches(image, _patch_order(patch_map)[n:], baseline)
+
+
+def _progressive(start: torch.Tensor, source: torch.Tensor, order: np.ndarray) -> torch.Tensor:
+    """Every step of a perturbation as one batch, shape (len(order) + 1, 3, H, W):
+    `start`, then `start` with patches copied in from `source` one more at a
+    time, following `order`."""
+    patch_size = start.shape[-1] // PATCH_GRID
+    current = start.clone()
+    steps = [current.clone()]
+    for idx in order:
+        r, c = divmod(int(idx), PATCH_GRID)
+        rs, cs = r * patch_size, c * patch_size
+        current[..., rs:rs + patch_size, cs:cs + patch_size] = source[..., rs:rs + patch_size, cs:cs + patch_size]
+        steps.append(current.clone())
+    return torch.cat(steps)
+
+
+def _confidence(model: torch.nn.Module, images: torch.Tensor, target_class: int, batch_size: int = 64) -> list[float]:
+    model.eval()
+    probs = [
+        F.softmax(model(images[i:i + batch_size]), dim=1)[:, target_class]
+        for i in range(0, len(images), batch_size)
+    ]
+    return torch.cat(probs).tolist()
+
+
 @torch.no_grad()
+def deletion_curve(model: torch.nn.Module, image: torch.Tensor, patch_map: np.ndarray,
+                    target_class: int, baseline: torch.Tensor) -> list[float]:
+    """Confidence in `target_class` after deleting 0, 1, ..., all patches."""
+    return _confidence(model, _progressive(image, baseline, _patch_order(patch_map)), target_class)
+
+
+@torch.no_grad()
+def insertion_curve(model: torch.nn.Module, image: torch.Tensor, patch_map: np.ndarray,
+                     target_class: int, baseline: torch.Tensor) -> list[float]:
+    """Confidence in `target_class` after inserting 0, 1, ..., all patches."""
+    return _confidence(model, _progressive(baseline, image, _patch_order(patch_map)), target_class)
+
+
 def deletion_auc(model: torch.nn.Module, image: torch.Tensor, patch_map: np.ndarray,
                   target_class: int, baseline: torch.Tensor) -> float:
     """Starts from the full image, progressively replaces the most important
     patches with `baseline` first. Lower AUC = more faithful explanation."""
-    model.eval()
-    order = _patch_order(patch_map)
-    scores = [
-        F.softmax(model(_replace_patches(image, order[:n], baseline)), dim=1)[0, target_class].item()
-        for n in range(len(order) + 1)
-    ]
-    return _trapezoid_auc(scores)
+    return _trapezoid_auc(deletion_curve(model, image, patch_map, target_class, baseline))
 
 
-@torch.no_grad()
 def insertion_auc(model: torch.nn.Module, image: torch.Tensor, patch_map: np.ndarray,
                    target_class: int, baseline: torch.Tensor) -> float:
     """Starts from `baseline`, progressively inserts the most important
     original patches first. Higher AUC = more faithful explanation."""
-    model.eval()
-    order = _patch_order(patch_map)
-    scores = [
-        F.softmax(model(_replace_patches(image, order[n:], baseline)), dim=1)[0, target_class].item()
-        for n in range(len(order) + 1)
-    ]
-    return _trapezoid_auc(scores)
+    return _trapezoid_auc(insertion_curve(model, image, patch_map, target_class, baseline))
+
+
+# --- Figure helpers (faithfulness.py, qualitative_figure.py) -----------------
+
+def denormalize(image: torch.Tensor, mean, std) -> np.ndarray:
+    """(1, 3, H, W) normalized tensor -> (H, W, 3) float array in [0, 1] for display."""
+    mean = torch.tensor(mean).view(3, 1, 1)
+    std = torch.tensor(std).view(3, 1, 1)
+    pixels = (image[0].detach().cpu() * std + mean).clamp(0, 1)
+    return pixels.permute(1, 2, 0).numpy()
+
+
+def show_overlay(ax, rgb: np.ndarray, patch_map: np.ndarray) -> None:
+    """Draws `rgb` on `ax` with the 14x14 `patch_map` on top as a heatmap."""
+    heatmap = np.kron(patch_map, np.ones((rgb.shape[0] // PATCH_GRID, rgb.shape[1] // PATCH_GRID)))
+    ax.imshow(rgb)
+    ax.imshow(heatmap, cmap="jet", alpha=0.45)
+
+
+@torch.no_grad()
+def pick_examples(models: list, datasets: list, num_classes: int, seed: int = 0) -> list[int]:
+    """One test-set index per class, chosen by a fixed rule instead of by hand:
+    walking the test set in a seeded random order, the first image of each
+    class that every model in `models` classifies correctly. `datasets[i]` is
+    the test set under `models[i]`'s own eval transform."""
+    labels = datasets[0].df["label_idx"].tolist()
+    picked = {}
+    for idx in random.Random(seed).sample(range(len(labels)), len(labels)):
+        label = labels[idx]
+        if label in picked:
+            continue
+        all_correct = True
+        for model, dataset in zip(models, datasets):
+            image = dataset[idx][0].unsqueeze(0).to(next(model.parameters()).device)
+            all_correct = all_correct and int(model(image).argmax(dim=1).item()) == label
+        if all_correct:
+            picked[label] = idx
+        if len(picked) == num_classes:
+            break
+    return [picked[c] for c in range(num_classes)]
+
+
+XAI_METHODS = {"grad_cam": grad_cam, "attention_rollout": attention_rollout}

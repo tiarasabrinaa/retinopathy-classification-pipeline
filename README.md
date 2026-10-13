@@ -14,12 +14,14 @@ configs/
   convnext_tiny.yaml
   deit_small.yaml
 common.py                # Dataset, transforms, model builder, MLflow helpers — shared by the scripts below
-explain.py                 # Grad-CAM, Attention Rollout, deletion/insertion AUC — shared by run_explainability.py
+explain.py                 # Grad-CAM, Attention Rollout, deletion/insertion AUC — shared by the three XAI scripts below
 make_splits.py            # run once: builds the stratified train/val/test split
 train.py                  # fine-tunes ONE model per run, logs to MLflow
 start.sh                    # runs the full finetune_lr x finetune_epochs grid (see "Comparing learning rates and epoch budgets")
 evaluate.py                  # full classification report + ROC-AUC + confusion matrices for one trained model
 run_explainability.py       # explainability + faithfulness scoring for one trained model
+faithfulness.py             # deletion/insertion AUC for both winners + a figure of what deletion/insertion do to an image
+qualitative_figure.py       # side-by-side heatmap figure, same image per class for both winners
 ```
 
 No `src/` package, no framework-y layers — this is a 2-model research
@@ -142,6 +144,31 @@ script:
 Overlay PNGs stay local (same storage-quota reasoning as checkpoints, see
 below); only the mean deletion/insertion AUC (overall + per class) is
 logged to MLflow, under a `<run_name>_explain` run.
+
+### Figures for the paper
+
+Two scripts work on both winning models at once (default configs:
+`configs/_xai_convnext_winner.yaml` and `configs/_xai_deit_winner.yaml`) and
+save to `../results/`, without touching MLflow:
+
+```bash
+python faithfulness.py          # faithfulness.json + faithfulness_<model_name>.png
+python qualitative_figure.py    # xai_qualitative_comparison.png + xai_qualitative_examples.json
+```
+
+`faithfulness.py` scores every test image per model with deletion and
+insertion AUC (`--num-samples N` scores a random sample of N instead, for a
+quick run) and writes every image's score to `faithfulness.json`. Its figure shows, for one image per class, the input,
+the heatmap, the image after its top 25% of patches is deleted, the blurred
+baseline after the same patches are inserted, and both confidence curves.
+`qualitative_figure.py` draws the same images with each model's heatmap side
+by side.
+
+Both scripts pick the example images with the same fixed rule
+(`explain.pick_examples`: in a seeded random order, the first test image of
+each class that both models classify correctly), so the two figures show the
+same images and the choice is recorded in the JSON files. Pass `--indices`
+(test.csv row numbers, one per class) to choose them yourself.
 
 ## Sources
 
